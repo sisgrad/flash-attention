@@ -444,14 +444,17 @@ class FlashAttentionForwardSm120TMAOptimized(FlashAttentionForwardSm80):
         )
 
     def _get_tiled_mma(self):
-        # Reuse the SM80 tiled-MMA construction with SM120's MMA warp count
-        # (exclude the producer warp from MMA partitioning).
-        orig_num_threads = self.num_threads
-        self.num_threads = self.num_mma_warps * 32
-        try:
-            return FlashAttentionForwardSm80._get_tiled_mma(self)
-        finally:
-            self.num_threads = orig_num_threads
+        tiled_mma_qk = cute.make_tiled_mma(
+            warp.MmaF16BF16Op(self.dtype, Float32, (16, 8, 16)),
+            (self.num_mma_warps, 1, 1),
+            permutation_mnk=(self.tile_m, 16, 16),
+        )
+        tiled_mma_pv = cute.make_tiled_mma(
+            warp.MmaF16BF16Op(self.dtype, Float32, (16, 8, 16)),
+            (self.num_mma_warps, 1, 1),
+            permutation_mnk=(self.tile_m, 16, 16),
+        )
+        return tiled_mma_qk, tiled_mma_pv
     
     def _get_q_gmem_tiled_copy(self):
         """Create cp.async tiled copy for Q using all threads (SM80-style)."""
